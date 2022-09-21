@@ -19,6 +19,9 @@ public abstract class APersistentVector extends AFn implements IPersistentVector
                                                                List,
                                                                RandomAccess, Comparable,
                                                                Serializable, IHashEq {
+
+private static final long serialVersionUID = 4667575149454420891L;
+
 int _hash;
 int _hasheq;
 
@@ -98,15 +101,18 @@ static boolean doEquiv(IPersistentVector v, Object obj){
 	else if(obj instanceof List)
 		{
 		Collection ma = (Collection) obj;
-		if(ma.size() != v.count())
+
+		if((!(ma instanceof IPersistentCollection) || (ma instanceof Counted)) && (ma.size() != v.count()))
 			return false;
-		for(Iterator i1 = ((List) v).iterator(), i2 = ma.iterator();
-		    i1.hasNext();)
+
+		Iterator i2 = ma.iterator();
+
+		for(Iterator i1 = ((List) v).iterator(); i1.hasNext();)
 			{
-			if(!Util.equiv(i1.next(), i2.next()))
+			if(!i2.hasNext() || !Util.equiv(i1.next(), i2.next()))
 				return false;
 			}
-		return true;
+		return !i2.hasNext();
 		}
 	else
 		{

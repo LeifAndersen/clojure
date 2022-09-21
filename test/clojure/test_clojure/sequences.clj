@@ -796,6 +796,23 @@
     (is (= (assoc (array-map (repeat 1 :x) :y) '(:x) :z) {'(:x) :z}))
     (is (= (assoc (hash-map (repeat 1 :x) :y) '(:x) :z) {'(:x) :z})))
 
+(deftest test-partitionv
+  (are [x y] (= x y)
+    (partitionv 2 [1 2 3]) '((1 2))
+    (partitionv 2 [1 2 3 4]) '((1 2) (3 4))
+    (partitionv 2 []) ()
+
+    (partitionv 2 3 [1 2 3 4 5 6 7]) '((1 2) (4 5))
+    (partitionv 2 3 [1 2 3 4 5 6 7 8]) '((1 2) (4 5) (7 8))
+    (partitionv 2 3 []) ()
+
+    (partitionv 1 []) ()
+    (partitionv 1 [1 2 3]) '((1) (2) (3))
+
+    (partitionv 5 [1 2 3]) ()
+
+    (partitionv -1 [1 2 3]) ()
+    (partitionv -2 [1 2 3]) () ))
 
 (deftest test-iterate
       (are [x y] (= x y)
@@ -988,7 +1005,7 @@
       {} {:a 1 :b 2}
       #{} #{1 2} ))
 
-(defspec longrange-equals-range 100
+(defspec longrange-equals-range 1000
   (prop/for-all [start gen/int
                  end gen/int
                  step gen/s-pos-int]
@@ -1119,7 +1136,10 @@
     {}
     #{}
     ""
-    (into-array []) )
+    (into-array [])
+    (transient [])
+    (transient #{})
+    (transient {}))
 
   (are [x] (not (empty? x))
     '(1 2)
@@ -1128,7 +1148,10 @@
     {:a 1 :b 2}
     #{1 2}
     "abc"
-    (into-array [1 2]) ))
+    (into-array [1 2])
+    (transient [1])
+    (transient #{1})
+    (transient {1 2})))
 
 
 (deftest test-every?
@@ -1331,6 +1354,12 @@
   (is (= (partition-all 4 2 [1 2 3 4 5 6 7 8 9])
 	 [[1 2 3 4] [3 4 5 6] [5 6 7 8] [7 8 9] [9]])))
 
+(deftest test-partitionv-all
+  (is (= (partitionv-all 4 [1 2 3 4 5 6 7 8 9])
+        [[1 2 3 4] [5 6 7 8] [9]]))
+  (is (= (partitionv-all 4 2 [1 2 3 4 5 6 7 8 9])
+        [[1 2 3 4] [3 4 5 6] [5 6 7 8] [7 8 9] [9]])))
+
 (deftest test-shuffle-invariants
   (is (= (count (shuffle [1 2 3 4])) 4))
   (let [shuffled-seq (shuffle [1 2 3 4])]
@@ -1384,3 +1413,124 @@
     (when (reversible? coll)
       (is (= true (instance? clojure.lang.IMeta (rseq coll))))
       (is (= {:a true} (meta (with-meta (rseq coll) {:a true})))))))
+
+(deftest test-iteration-opts
+  (let [genstep (fn [steps]
+                  (fn [k] (swap! steps inc) (inc k)))
+        test (fn [expect & iteropts]
+               (is (= expect
+                      (let [nsteps (atom 0)
+                            iter (apply iteration (genstep nsteps) iteropts)
+                            ret (doall (seq iter))]
+                        {:ret ret :steps @nsteps})
+                      (let [nsteps (atom 0)
+                            iter (apply iteration (genstep nsteps) iteropts)
+                            ret (into [] iter)]
+                        {:ret ret :steps @nsteps}))))]
+    (test {:ret [1 2 3 4]
+           :steps 5}
+          :initk 0 :somef #(< % 5))
+    (test {:ret [1 2 3 4 5]
+           :steps 5}
+          :initk 0 :kf (fn [ret] (when (< ret 5) ret)))
+    (test {:ret ["1"]
+           :steps 2}
+          :initk 0 :somef #(< % 2) :vf str))
+
+  ;; kf does not stop on false
+  (let [iter #(iteration (fn [k]
+                           (if (boolean? k)
+                             [10 :boolean]
+                             [k k]))
+                         :vf second
+                         :kf (fn [[k v]]
+                               (cond
+                                 (= k 3) false
+                                 (< k 14) (inc k)))
+                         :initk 0)]
+    (is (= [0 1 2 3 :boolean 11 12 13 14]
+           (into [] (iter))
+           (seq (iter))))))
+
+(deftest test-iteration
+  ;; equivalence to line-seq
+  (let [readme #(java.nio.file.Files/newBufferedReader (.toPath (java.io.File. "readme.txt")))]
+    (is (= (with-open [r (readme)]
+             (vec (iteration (fn [_] (.readLine r)))))
+           (with-open [r (readme)]
+             (doall (line-seq r))))))
+
+  ;; paginated API
+  (let [items 12 pgsize 5
+        src (vec (repeatedly items #(java.util.UUID/randomUUID)))
+        api (fn [tok]
+              (let [tok (or tok 0)]
+                (when (< tok items)
+                  {:tok (+ tok pgsize)
+                   :ret (subvec src tok (min (+ tok pgsize) items))})))]
+    (is (= src
+           (mapcat identity (iteration api :kf :tok :vf :ret))
+           (into [] cat (iteration api :kf :tok :vf :ret)))))
+
+  (let [src [:a :b :c :d :e]
+        api (fn [k]
+              (let [k (or k 0)]
+                (if (< k (count src))
+                  {:item (nth src k)
+                   :k (inc k)})))]
+    (is (= [:a :b :c]
+           (vec (iteration api
+                           :somef (comp #{:a :b :c} :item)
+                           :kf :k
+                           :vf :item))
+           (vec (iteration api
+                           :kf #(some-> % :k #{0 1 2})
+                           :vf :item))))))
+
+(deftest test-reduce-on-coll-seqs
+  ;; reduce on seq of coll, both with and without an init
+  (are [coll expected expected-init]
+    (and
+      (= expected-init (reduce conj [:init] (seq coll)))
+      (= expected (reduce conj (seq coll))))
+    ;; (seq [ ... ])
+    []      []    [:init]
+    [1]     1     [:init 1]
+    [[1] 2] [1 2] [:init [1] 2]
+
+    ;; (seq { ... })
+    {}        []          [:init]
+    {1 1}     [1 1]       [:init [1 1]]
+    {1 1 2 2} [1 1 [2 2]] [:init [1 1] [2 2]]
+
+    ;; (seq (hash-map ... ))
+    (hash-map)         []          [:init]
+    (hash-map 1 1)     [1 1]       [:init [1 1]]
+    (hash-map 1 1 2 2) [1 1 [2 2]] [:init [1 1] [2 2]]
+
+    ;; (seq (sorted-map ... ))
+    (sorted-map)         []          [:init]
+    (sorted-map 1 1)     [1 1]       [:init [1 1]]
+    (sorted-map 1 1 2 2) [1 1 [2 2]] [:init [1 1] [2 2]])
+
+  (are [coll expected expected-init]
+    (and
+      (= expected-init (reduce + 100 (seq coll)))
+      (= expected (reduce + (seq coll))))
+
+    ;; (seq (range ...))
+    (range 0)   0 100
+    (range 1 2) 1 101
+    (range 1 3) 3 103))
+
+(defspec iteration-seq-equals-reduce 1000
+  (prop/for-all [initk gen/int
+                 seed gen/int]
+    (let [src (fn []
+                (let [rng (java.util.Random. seed)]
+                  (iteration #(unchecked-add % (.nextLong rng))
+                             :somef (complement #(zero? (mod % 1000)))
+                             :vf str
+                             :initk initk)))]
+      (= (into [] (src))
+         (into [] (seq (src)))))))

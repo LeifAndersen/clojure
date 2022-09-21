@@ -76,7 +76,6 @@
       <arg value="clojure.repl"/>
       <arg value="clojure.java.browse"/>
       <arg value="clojure.java.javadoc"/>
-      <arg value="clojure.java.math"/>
       <arg value="clojure.java.shell"/>
       <arg value="clojure.java.browse-ui"/>
       <arg value="clojure.string"/>
@@ -86,6 +85,7 @@
       <arg value="clojure.instant"/>
       <arg value="clojure.uuid"/>
       <arg value="clojure.core.reducers"/>
+      <arg value="clojure.math"/>
     </java>
   </target>
 
@@ -105,6 +105,7 @@
         <!--<sysproperty key="clojure.compiler.disable-locals-clearing" value="true"/>-->
       <sysproperty key="clojure.compiler.direct-linking" value="${directlinking}"/>
       <arg value="clojure.test-clojure.protocols.examples"/>
+      <arg value="clojure.test-clojure.proxy.examples"/>
       <arg value="clojure.test-clojure.genclass.examples"/>
       <arg value="clojure.test-clojure.compilation.load-ns"/>
       <arg value="clojure.test-clojure.annotations"/>
